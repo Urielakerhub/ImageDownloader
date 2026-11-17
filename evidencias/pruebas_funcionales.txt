@@ -1,0 +1,29 @@
+Evidencia de pruebas funcionales - ImageDownloader
+Fecha: 2026-11-16 23:31
+
+Comando: java -cp out PruebasFuncionales
+
+==============================================================================
+Caso   Descripción                                          Resultado
+------------------------------------------------------------------------------
+P01    Sin argumentos                                       PASA
+P02    URL inválida                                         PASA
+P03    Protocolo no admitido (ftp, file)                    PASA
+P04    HTML sin imágenes                                    PASA
+P05    URL absoluta de imagen                               PASA
+P06    URL relativa de imagen                               PASA
+P07    Imagen duplicada (una sola descarga)                 PASA
+P08    Imagen inexistente: error y continúa                 PASA
+P09    Recurso que no es imagen                             PASA
+P09b   Referencias data: y javascript: rechazadas           PASA
+P10    Servidor no disponible                               PASA
+P11    Archivo mayor al límite cancelado, sin parciales     PASA
+P12    Archivo existente: no se sobrescribe                 PASA
+X01    Redirección válida (302) seguida                     PASA
+X02    Redirección a esquema no admitido rechazada          PASA
+X03    Bucle de redirecciones limitado                      PASA
+X04    Página que no es HTML rechazada                      PASA
+X05    Informe descargas.csv con 4 columnas                 PASA
+------------------------------------------------------------------------------
+Casos: 18   Fallos: 0
+Código de salida: 0

@@ -15,14 +15,21 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+
 public class ImageDownloader {
+
+    // ===== FASE 2: validación del argumento =====
+
 
     public static URL validarURL(String argumento) {
         if (argumento == null || argumento.isBlank()) {
@@ -51,6 +58,8 @@ public class ImageDownloader {
         }
     }
 
+    // ===== FASE 3: conexión y recuperación del HTML =====
+
     static final int CONNECT_TIMEOUT_MS = 10_000;
     static final int READ_TIMEOUT_MS = 15_000;
     static final int MAX_REDIRECTS = 5;
@@ -62,7 +71,9 @@ public class ImageDownloader {
     private static final Pattern CHARSET_META =
             Pattern.compile("<meta[^>]+charset\\s*=\\s*[\"']?([\\w.:-]+)", Pattern.CASE_INSENSITIVE);
 
+
     record Pagina(URL urlFinal, int codigo, String tipoContenido, String html) { }
+
 
     @SuppressWarnings("deprecation")
     static HttpURLConnection abrirConexion(URL inicial) throws IOException {
@@ -107,6 +118,7 @@ public class ImageDownloader {
         throw new IOException("demasiadas redirecciones (máximo " + MAX_REDIRECTS + ")");
     }
 
+
     public static Pagina obtenerPagina(URL url) throws IOException {
         HttpURLConnection http = abrirConexion(url);
         try {
@@ -128,6 +140,7 @@ public class ImageDownloader {
             http.disconnect();
         }
     }
+
 
     public static String obtenerHTML(URL url) throws IOException {
         return obtenerPagina(url).html();
@@ -152,6 +165,7 @@ public class ImageDownloader {
         }
         return salida.toByteArray();
     }
+
 
     static Charset detectarCodificacion(String tipo, byte[] bytes) {
         Matcher cabecera = CHARSET_CABECERA.matcher(tipo);
@@ -180,11 +194,15 @@ public class ImageDownloader {
         }
     }
 
+    // ===== FASE 4: identificación de referencias a imágenes =====
+
     private static final Pattern ETIQUETA_IMG =
             Pattern.compile("<img\\b[^>]*>", Pattern.CASE_INSENSITIVE);
+    // (?<![\\w-]) evita confundir src con data-src.
     private static final Pattern ATRIBUTO_SRC =
             Pattern.compile("(?<![\\w-])src\\s*=\\s*([\"'])(.*?)\\1",
                     Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
 
     public static Set<String> extraerImagenes(String html) {
         Set<String> referencias = new LinkedHashSet<>();
@@ -201,7 +219,10 @@ public class ImageDownloader {
         return referencias;
     }
 
+    // ===== FASE 5: resolución de direcciones relativas =====
+
     private static final Pattern ESQUEMA = Pattern.compile("^([a-zA-Z][a-zA-Z0-9+.-]*):");
+
 
     @SuppressWarnings("deprecation")
     public static URL resolverImagen(URL urlPagina, String referencia) throws Exception {
@@ -232,6 +253,8 @@ public class ImageDownloader {
         return resultado;
     }
 
+    // ===== FASE 6: descarga binaria y almacenamiento =====
+
     static final long MAX_IMAGE_BYTES = 10L * 1024 * 1024;
 
     private static final Map<String, String> EXTENSIONES = Map.of(
@@ -241,15 +264,18 @@ public class ImageDownloader {
             "image/gif", ".gif",
             "image/webp", ".webp");
 
+
     record Resultado(boolean exito, Path archivo, String estado, long bytes) {
         static Resultado error(String estado) {
             return new Resultado(false, null, estado, 0);
         }
     }
 
+
     public static boolean descargarImagen(URL urlImagen, Path directorio, int numero) {
         return descargar(urlImagen, directorio, numero).exito();
     }
+
 
     static Resultado descargar(URL urlImagen, Path directorio, int numero) {
         HttpURLConnection http = null;
@@ -303,8 +329,9 @@ public class ImageDownloader {
             }
             if (temporal != null) {
                 try {
-                    Files.deleteIfExists(temporal);
+                    Files.deleteIfExists(temporal); // elimina el archivo parcial
                 } catch (IOException ignorada) {
+                    // nada más que hacer
                 }
             }
         }
@@ -317,9 +344,9 @@ public class ImageDownloader {
                     sufijo == 0 ? "" : "_" + sufijo, extension);
             Path destino = directorio.resolve(nombre);
             try {
-                return Files.move(temporal, destino);
+                return Files.move(temporal, destino); // sin REPLACE_EXISTING
             } catch (FileAlreadyExistsException existe) {
-                continue;
+                // probar con el siguiente sufijo
             }
         }
         throw new IOException("no se encontró un nombre libre para la imagen " + numero);
@@ -339,32 +366,149 @@ public class ImageDownloader {
         return mensaje == null ? e.getClass().getSimpleName() : mensaje;
     }
 
-    // ----- main de la fase -----
+    // ===== FASE 7: integración =====
+
+    static final int MAX_IMAGES = 200;
+    static final String DIRECTORIO_POR_DEFECTO = "imagenes";
 
     public static void main(String[] args) {
-        if (args.length != 1) {
-            System.err.println("Uso: java ImageDownloader <URL>");
-            return;
-        }
-
-        try {
-            Pagina pagina = obtenerPagina(validarURL(args[0]));
-            Set<String> referencias = extraerImagenes(pagina.html());
-
-            System.out.println("Imágenes encontradas: " + referencias.size());
-
-            for (String referencia : referencias) {
-                try {
-                    URL imagen = resolverImagen(pagina.urlFinal(), referencia);
-                    System.out.println(imagen);
-                } catch (Exception e) {
-                    System.err.println("Error: " + e.getMessage());
-                }
-            }
-
-        } catch (IllegalArgumentException | IOException e) {
-            System.err.println("Error: " + e.getMessage());
+        int codigo = ejecutar(args);
+        if (codigo != 0) {
+            System.exit(codigo);
         }
     }
 
+    /** Coordina la aplicación y devuelve el código de salida (0 = correcto). */
+    static int ejecutar(String[] args) {
+        if (args.length < 1 || args.length > 2) {
+            System.err.println("Uso: java ImageDownloader <URL> [directorio]");
+            return 2;
+        }
+        URL paginaUrl;
+        Path directorio;
+        try {
+            paginaUrl = validarURL(args[0]);
+            directorio = Path.of(args.length == 2 ? args[1] : DIRECTORIO_POR_DEFECTO);
+        } catch (IllegalArgumentException e) { // incluye InvalidPathException
+            System.err.println("URL o directorio inválido: " + e.getMessage());
+            return 2;
+        }
+
+        System.out.println("ImageDownloader");
+        System.out.println("-".repeat(39));
+        System.out.println("Conectando con: " + paginaUrl);
+        System.out.println();
+
+        Pagina pagina;
+        try {
+            pagina = obtenerPagina(paginaUrl);
+        } catch (IOException e) {
+            System.err.println("No se pudo obtener la página: " + describir(e));
+            return 1;
+        }
+        System.out.println("Código HTTP: " + pagina.codigo());
+        System.out.println("Tipo de contenido: " + pagina.tipoContenido());
+        System.out.println();
+        System.out.println("Analizando documento HTML...");
+
+        // Las referencias relativas se resuelven respecto a la URL final (tras redirecciones).
+        Map<String, URL> destinos = new LinkedHashMap<>();
+        List<String[]> invalidas = new ArrayList<>();
+        for (String referencia : extraerImagenes(pagina.html())) {
+            try {
+                URL resuelta = resolverImagen(pagina.urlFinal(), referencia);
+                destinos.putIfAbsent(resuelta.toString(), resuelta);
+            } catch (Exception e) {
+                invalidas.add(new String[] {referencia, describir(e)});
+            }
+        }
+
+        int encontradas = destinos.size() + invalidas.size();
+        System.out.println();
+        System.out.println("Imágenes encontradas: " + encontradas);
+        if (destinos.size() > MAX_IMAGES) {
+            System.out.println("Aviso: solo se procesarán las primeras " + MAX_IMAGES + ".");
+        }
+        System.out.println();
+
+        List<String[]> filasCsv = new ArrayList<>();
+        int exitosas = 0;
+        int fallidas = 0;
+        int posicion = 0;
+        int total = Math.min(destinos.size(), MAX_IMAGES) + invalidas.size();
+
+        for (Map.Entry<String, URL> entrada : destinos.entrySet()) {
+            if (posicion >= MAX_IMAGES) {
+                break;
+            }
+            posicion++;
+            // El número del archivo es consecutivo entre las descargas correctas.
+            Resultado r = descargar(entrada.getValue(), directorio, exitosas + 1);
+            String nombre = r.exito() ? r.archivo().getFileName().toString()
+                    : nombreRemoto(entrada.getValue());
+            imprimirLinea(posicion, total, nombre, r.exito() ? "OK" : "ERROR - " + r.estado());
+            filasCsv.add(new String[] {entrada.getKey(),
+                    r.exito() ? r.archivo().getFileName().toString() : "—",
+                    r.estado(), String.valueOf(r.bytes())});
+            if (r.exito()) {
+                exitosas++;
+            } else {
+                fallidas++;
+            }
+        }
+        for (String[] invalida : invalidas) {
+            posicion++;
+            imprimirLinea(posicion, total, abreviar(invalida[0]), "ERROR - " + invalida[1]);
+            filasCsv.add(new String[] {invalida[0], "—", invalida[1], "0"});
+            fallidas++;
+        }
+
+        System.out.println();
+        System.out.println("-".repeat(39));
+        System.out.println("Descargas exitosas: " + exitosas);
+        System.out.println("Descargas fallidas: " + fallidas);
+        System.out.println("Directorio: " + directorio + "/");
+
+        try {
+            Path csv = directorio.resolve("descargas.csv");
+            escribirCSV(csv, filasCsv);
+            System.out.println("Informe: " + csv);
+        } catch (IOException e) {
+            System.err.println("No se pudo escribir descargas.csv: " + describir(e));
+        }
+        return 0;
+    }
+
+    private static void imprimirLinea(int posicion, int total, String nombre, String estado) {
+        String etiqueta = "[" + posicion + "/" + total + "] " + abreviar(nombre) + " ";
+        System.out.println(etiqueta + ".".repeat(Math.max(3, 38 - etiqueta.length())) + " " + estado);
+    }
+
+    private static String nombreRemoto(URL url) {
+        String ruta = url.getPath();
+        int barra = ruta.lastIndexOf('/');
+        String nombre = barra >= 0 ? ruta.substring(barra + 1) : ruta;
+        return nombre.isEmpty() ? url.getHost() : nombre;
+    }
+
+    private static String abreviar(String texto) {
+        return texto.length() <= 28 ? texto : texto.substring(0, 25) + "...";
+    }
+
+    /** Genera el informe CSV (se reescribe en cada ejecución). */
+    static void escribirCSV(Path csv, List<String[]> filas) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\"URL de imagen\",\"Archivo local\",\"Estado\",\"Tamaño (bytes)\"\n");
+        for (String[] fila : filas) {
+            for (int i = 0; i < fila.length; i++) {
+                if (i > 0) {
+                    sb.append(',');
+                }
+                sb.append('"').append(fila[i].replace("\"", "\"\"")).append('"');
+            }
+            sb.append('\n');
+        }
+        Files.createDirectories(csv.toAbsolutePath().getParent());
+        Files.writeString(csv, sb.toString(), StandardCharsets.UTF_8);
+    }
 }
