@@ -340,28 +340,31 @@ public class ImageDownloader {
     }
 
     // ----- main de la fase -----
+
     public static void main(String[] args) {
         if (args.length != 1) {
             System.err.println("Uso: java ImageDownloader <URL>");
             return;
         }
+
         try {
             Pagina pagina = obtenerPagina(validarURL(args[0]));
-            int numero = 1;
-            for (String referencia : extraerImagenes(pagina.html())) {
+            Set<String> referencias = extraerImagenes(pagina.html());
+
+            System.out.println("Imágenes encontradas: " + referencias.size());
+
+            for (String referencia : referencias) {
                 try {
-                    URL url = resolverImagen(pagina.urlFinal(), referencia);
-                    Resultado r = descargar(url, Path.of("imagenes"), numero);
-                    System.out.println(url + " -> " + r.estado());
-                    if (r.exito()) {
-                        numero++;
-                    }
+                    URL imagen = resolverImagen(pagina.urlFinal(), referencia);
+                    System.out.println(imagen);
                 } catch (Exception e) {
-                    System.out.println(referencia + " -> rechazada: " + e.getMessage());
+                    System.err.println("Error: " + e.getMessage());
                 }
             }
+
         } catch (IllegalArgumentException | IOException e) {
             System.err.println("Error: " + e.getMessage());
         }
     }
+
 }
