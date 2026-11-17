@@ -8,25 +8,14 @@ import java.net.URL;
 import java.net.URLConnection;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashSet;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Descarga las imágenes referenciadas mediante etiquetas {@code <img>} en una
- * página web. Todas las conexiones se realizan con {@link URL#openConnection()}
- * y {@link HttpURLConnection}; no se usan bibliotecas externas.
- */
 public class ImageDownloader {
 
-    // ===== FASE 2: validación del argumento =====
-
-    /**
-     * Convierte el argumento en una {@link URL}. Solo admite http y https y
-     * exige un servidor. {@link URI} se usa únicamente para validar y convertir.
-     *
-     * @throws IllegalArgumentException si la dirección no es válida
-     */
     public static URL validarURL(String argumento) {
         if (argumento == null || argumento.isBlank()) {
             throw new IllegalArgumentException("la dirección está vacía");
@@ -54,7 +43,6 @@ public class ImageDownloader {
         }
     }
 
-
     static final int CONNECT_TIMEOUT_MS = 10_000;
     static final int READ_TIMEOUT_MS = 15_000;
     static final int MAX_REDIRECTS = 5;
@@ -66,9 +54,7 @@ public class ImageDownloader {
     private static final Pattern CHARSET_META =
             Pattern.compile("<meta[^>]+charset\\s*=\\s*[\"']?([\\w.:-]+)", Pattern.CASE_INSENSITIVE);
 
-
     record Pagina(URL urlFinal, int codigo, String tipoContenido, String html) { }
-
 
     @SuppressWarnings("deprecation")
     static HttpURLConnection abrirConexion(URL inicial) throws IOException {
@@ -113,7 +99,6 @@ public class ImageDownloader {
         throw new IOException("demasiadas redirecciones (máximo " + MAX_REDIRECTS + ")");
     }
 
-
     public static Pagina obtenerPagina(URL url) throws IOException {
         HttpURLConnection http = abrirConexion(url);
         try {
@@ -136,7 +121,6 @@ public class ImageDownloader {
         }
     }
 
-    /** Versión simplificada: devuelve solo el texto del HTML. */
     public static String obtenerHTML(URL url) throws IOException {
         return obtenerPagina(url).html();
     }
@@ -188,6 +172,27 @@ public class ImageDownloader {
         }
     }
 
+    private static final Pattern ETIQUETA_IMG =
+            Pattern.compile("<img\\b[^>]*>", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ATRIBUTO_SRC =
+            Pattern.compile("(?<![\\w-])src\\s*=\\s*([\"'])(.*?)\\1",
+                    Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
+    public static Set<String> extraerImagenes(String html) {
+        Set<String> referencias = new LinkedHashSet<>();
+        Matcher etiquetas = ETIQUETA_IMG.matcher(html);
+        while (etiquetas.find()) {
+            Matcher src = ATRIBUTO_SRC.matcher(etiquetas.group());
+            if (src.find()) {
+                String valor = src.group(2).trim().replace("&amp;", "&");
+                if (!valor.isEmpty()) {
+                    referencias.add(valor);
+                }
+            }
+        }
+        return referencias;
+    }
+
     // ----- main de la fase -----
     public static void main(String[] args) {
         if (args.length != 1) {
@@ -196,10 +201,9 @@ public class ImageDownloader {
         }
         try {
             Pagina pagina = obtenerPagina(validarURL(args[0]));
-            System.out.println("Código HTTP: " + pagina.codigo());
-            System.out.println("Tipo de contenido: " + pagina.tipoContenido());
-            String html = pagina.html();
-            System.out.println(html.substring(0, Math.min(500, html.length())));
+            Set<String> referencias = extraerImagenes(pagina.html());
+            System.out.println("Imágenes encontradas: " + referencias.size());
+            referencias.forEach(System.out::println);
         } catch (IllegalArgumentException | IOException e) {
             System.err.println("Error: " + e.getMessage());
         }
